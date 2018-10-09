@@ -1,0 +1,341 @@
+---
+title: "Text Analysis of Political Subreddits: The Trump/Clinton Dichotomy"
+author: "Senan Hogan-H., Shirley Jiang"  
+date: "14 December 2017"
+header-includes:
+  - \usepackage{amsmath}
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+rm(list=ls())
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, cache=TRUE, 
+                      fig.align = "center")
+options(digits=4)
+set.seed(47)
+# install.packages(c('stringr', 'tidyverse', 'RTextTools', 'quanteda', 'SnowballC', 'wordcloud', 'tm', 'caret', 'e1071', 'klaR', 'tidytext', 'readr', 'stringi'))
+library(stringr)
+library(tidyverse)
+library(RTextTools)
+library(quanteda)
+library(SnowballC)
+library(wordcloud)
+library(tm)
+library(caret)
+library(e1071)
+library(klaR)
+library(tidytext)
+library(readr)
+library(stringi)
+```
+
+## Introduction
+
+Reddit is an online website for discussion, content aggregation and rating. The platform is divided to thousands of subreddits, which are communities built by users for a specific topic.  Users have created subreddits for uncountably  many diverse topics, from following professional sports, such as the NFL, to pictures of puppies.  Over the last two years, reddit has come under scrutiny from the news media over its sommunities that have support for (now President) Donald Trump and the alt-right, prompting the Reddit staff to track down and delete communities devoted to the alt-right.
+
+The site has gone through a tough process of finding the middle ground between the free expression of its users' with their community building and the condemnation of racist or hateful sentiments associated with the alt-right and surrounding political figures. We're interested in comparing the use of words in comments in the official candidate subreddit for Trump to those for the Clinton subreddit, to see whether there are differences in word usage, and differences by sentiment analysis.  Lastly, we create a classification model to classify comments as belonging in the Trump or Clinton subreddit, to be applied to comments from a neutral subreddit, seeing the relative prevalence of political support in that neutral subreddit. 
+
+## The Combined Dataset
+
+We chose to work with all the text data from every single comment on the official 2016 presidential candidate subreddits.  The official Donald Trump support subreddit is called "r/The_Donald" and was created in 2015 following Trump's plan to run in the 2016 election; the official Hillary Clinton is called "r/hillaryclinton" was also created in 2015 following Clinton's plan to run in the 2016 election. Originally, we used a Python scraper to pull commments using the Reddit API; however, the Redddit API can only pull 100 comments at a time. We decided to find an alternative and more efficient way to collect the dataset. 
+
+Google Bigquery hosts a full repository of data about Reddit, including a near complete history of over 3 billion comments across the entire site.  We pulled every single comment for the respective subreddits using SQL commands, by filtering on the relevant subreddit titles in the year 2016.  The resulting monthly files were merged together, to create a huge .csv file storing every comment for both the subreddits.  The data set's observations are each comments posted on the website, with variables 'body' for the text of the comment, 'score' for users' ratings of the comment, 'controversiality' for whether reddit counts the comment as controversial, 'month' for month the comment was posted in 2016 and 'subreddit' for whether it was posted in the Trump or Clinton subreddit.  
+
+Note: the .csv files used are hosted at the Google cloud links used in the code, for anyone to access.
+
+First load the dataset, and apply some routine cleaning steps.
+
+```{r, echo=FALSE}
+Trump_Clinton.comments <- readr::read_csv(url('https://storage.googleapis.com/trump_clinton_comments/trump_clinton_comments.csv'))
+Trump_Clinton.comments <- sample_n(Trump_Clinton.comments, 10000)
+
+Trump_Clinton.comments <- Trump_Clinton.comments %>%
+  dplyr::select(body, score, month, subreddit) %>%
+  filter(body != '[deleted]') %>%
+  filter(body != '[removed]') %>%
+  filter(!is.na(body)) %>%
+  filter(!is.na(subreddit))  
+```
+The dataset is extremely large, with around 9 million comments.  Since the data set is extremely large, we ran the analysis on a random subset of 1 million observations.  It should be noted that the Trump subreddit was around 5 times as large as the Clinton subreddit (by comment frequency).  We can see this in the following grap which shows the amount of comments per month. We see a sharp spike in comment frequency for Hillary and Trump starting in October, the month right before the November 2 election date. The Trumo comments increased by about 33% in October compared to the previous month and continued to stay at the same level for the next two months.  
+
+```{r, echo=FALSE}
+Trump_Clinton.comments$month2 <- as.Date(paste( '01',
+  paste(Trump_Clinton.comments$month, " 2016" )), format='%d %b %Y')
+
+Trump_Clinton.comments %>%
+  group_by(subreddit) %>%
+  count(month2) %>%
+  ggplot(aes(month2, n, colour = subreddit)) +
+  geom_point() + 
+  geom_line() + 
+  labs(x = "Month", y = "Number of Comments, per month", colour = "Subreddit") +
+  scale_color_manual(values=c("blue", "red"))
+```
+
+Below is one of the most 'upvoted' post on the Clinton campaign subreddit, to show an example of one of most the popular posts.
+
+![A top post on r/hillaryclinton, November 2016](Trump_election_post.png) 
+
+Below is the most 'upvoted' post on the Trump campaign subreddit, where the man himself (or perhaps some of his campaign staff) answered some questions for interested parties.  There was some controversy surrounding this event on Reddit at the time, and as far as we are aware only posts pre-vetted by the site's moderators were answered by Trump (or his staff).
+
+![A top post on r/the_Donald, November 2016](Trump2_election_post.png)
+
+## Word Use Comparison
+
+The first question to ask is how use of words compare in the subreddits.  Following are a set of bargraphs to show the 30 most frequent words in the respective subreddits.
+
+```{r, echo=FALSE}
+reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"
+Clinton.words <- Trump_Clinton.comments %>%
+  filter(subreddit == 'Clinton') %>%
+  unnest_tokens(word, body, token  = "regex", pattern = reg) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]")) %>%
+  count(word) 
+Clinton.words <- head(arrange(Clinton.words,desc(n)), n = 30)
+
+Clinton.words %>% ggplot(aes(x = reorder(word, -n), y = n)) +
+         geom_bar(stat = "identity", fill='blue') + coord_flip() +
+  labs(x = "Word", y = "Frequency", title='Most Frequent Words in the Clinton Subreddit') 
+
+rm(Clinton.words)
+```
+
+Trump is one of the most frequent word seen in the Clinton subreddit, which implies that the topic of Trump was the most spoken about. Most of the other words are not unexpected, words such as Bernie and Sanders (Clinton's primary challenger) and a few words relating to the campaign process, like supporters, people and campaign.  Interestingly, there are a few examples of words left over from people providing web links to other pages, https (which begins a url link), www (the same), and mention of twitter.  This implies one of most common forms of commenting on the Clinton subreddit is linking to an external source, including twitter.
+
+```{r, echo=FALSE}
+Trump.words <- Trump_Clinton.comments %>%
+  filter(subreddit == 'Trump') %>%
+  unnest_tokens(word, body, token  = "regex", pattern = reg) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]")) %>%
+  count(word) 
+Trump.words <- head(arrange(Trump.words,desc(n)), n = 30)
+
+Trump.words %>% ggplot(aes(x = reorder(word, -n), y = n)) +
+         geom_bar(stat = "identity", fill='red') + coord_flip() +
+  labs(x = "Word", y = "Frequency", title='Most Frequent Words in the Trump Subreddit') 
+
+rm(Trump.words)
+```
+
+For the Trump subreddit the most frequent words include: Islam, swear words, and derogatory words.  Many of the words may be associated with anger against the Clinton campaign, mirroring the words of candidate Trump on the election trail.  The Trump subreddit also had a very surpising amount of the collection of characters '0cf3ytY'.  This turns out to be the remanant of a link, https://i.imgur.com/0cf3ytY.jpg, of a fake picture that Trump tweeted that implies Hillary Clinton is allied with a KKK supporter.
+
+![The picture so commonly linked to on the Trump subreddit.](0cf3ytY.jpg)
+
+What about words that increase in frequency with respect to the other subreddit?  
+Here we look at log odds ratio comparison of most common words in the subreddits, where the log ration is given by:
+$$R = log_2(\frac{\frac{\text{Frequency for Specific Word in Clinton subreddit}}{\text{Total Frequency for Words in Clinton subreddit} }}{\frac{\text{Frequency for Specific Word in Trump subreddit}}{\text{Total Frequency for Words in Trump subreddit} }})$$
+
+This gives us a way of looking at which words are overrepresented in each subreddit.
+
+```{r, echo=FALSE}
+Trump_Clinton.ratio <- Trump_Clinton.comments %>%
+  unnest_tokens(word, body, token  = "regex", pattern = reg) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]")) %>%
+  count(word, subreddit)%>%
+  filter(sum(n) >= 5) %>%
+  spread(subreddit, n, fill = 0) %>%
+  ungroup() %>%
+  mutate_each(funs((. + 1) / sum(. + 1)), -word) %>%
+  mutate(logratio = log2(Clinton / Trump)) %>%
+  arrange(desc(logratio))
+
+Trump_Clinton.ratio1 <- head(arrange(Trump_Clinton.ratio,desc(logratio)), n = 15)
+Trump_Clinton.ratio2 <- head(arrange(Trump_Clinton.ratio,desc(-logratio)), n = 15)
+rm(Trump_Clinton.ratio)
+Trump_Clinton.ratio1$subreddit <- 'Clinton'
+Trump_Clinton.ratio2$subreddit <- 'Trump'
+Trump_Clinton.ratio <- rbind(Trump_Clinton.ratio1, Trump_Clinton.ratio2)
+Trump_Clinton.ratio <- Trump_Clinton.ratio %>% arrange(desc(-logratio)) 
+
+
+words <- Trump_Clinton.ratio$word
+Trump_Clinton.ratio %>% 
+  ggplot(aes(x = word, y = logratio, colour = subreddit)) +
+         geom_bar(stat = "identity") +
+  labs(x = "Word", y = "Log Relative Frequency", 
+       title='Words by Relative Frequency in the Candidate Subreddits') +
+  scale_color_manual(values=c("blue", "red")) + 
+  scale_x_discrete(limits = words) +
+  coord_flip() 
+rm(Trump_Clinton.ratio)
+rm(words)
+```
+
+The Clinton subreddit had many, many more instances of the 'tweetsincommentsbot,' which is a reply to comments that link to a tweet.  This implies the comments in the Clinton subreddit link to tweets much more often than Trump commenters.  Links to the statistical anylsis site 538 are alsom much more frequent in the CLinton subreddit, as are words that may be commonly used to describe candidate Trump by Clinton supporters (for example emotional).  On the other hand, Trump commenters are much more likely to mention ISIS, and the imgur link mentioned before, and (seemingly) words describing animals.
+
+## Sentiment Analysis 
+
+In order to gain a view of the overall attitudes (sentiments) being expresesd in the subreddits, we conducted a sentiment analysis. We used the Bing lexcion for our sentiment analysis. The Bing lexicon categorizes words into two sentiment categorizes, positive and negative. The following is a sentiment comparison between the Clinton subreddit and Trump subreddit. 
+
+## Sentiment Analysis Clinton 
+```{r, echo=FALSE}
+words.clinton <- Trump_Clinton.comments %>% filter(subreddit=='Clinton')
+words.clinton <- words.clinton[,1] %>% unnest_tokens(word, body)
+
+#bing lexicon 
+bing_word_counts.clinton <- words.clinton %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+#plot Bing lexicon works 
+plot.bing.clinton <- bing_word_counts.clinton %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ggplot(aes(reorder(word, n), n, fill = sentiment)) +
+  geom_bar(alpha = 0.8, stat = "identity", show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(y = "Contribution to sentiment", x = NULL) +
+  coord_flip()
+
+#nrc lexicon 
+nrc_word_counts.clinton <- words.clinton %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(sentiment)) %>%
+  count(sentiment, sort = TRUE)
+plot.bing.clinton
+nrc_word_counts.clinton
+
+rm(words.clinton)
+rm(bing_word_counts.clinton)
+rm(plot.bing.clinton)
+rm(nrc_word_counts.clinton)
+```
+
+Looking at the Clinton sentiment analysis, there is no clear word leader in negative sentiments or positive sentiments. The word Trump appears the most frequenty for positive sentiments. However, it cannot be determined if the word Trump is being used as a verb or the candidate's name. One would assume it is most freqquently being used as a proper noun, thus one cannot really make any conclusions about the positive sentiment categorization of the word Trump. The overall sentiment analysis implies there is no general divide in negative or positive comments, instead the comments are in general pretty varied in their sentiments. Interestingly, the word pretty is a sentiment expressed in the Clinton comments Thus, there is evidence of female words used in the Clinton comments. 
+
+## Sentiment Analysis Trump 
+```{r, echo=FALSE}
+words.trump <- Trump_Clinton.comments %>% filter(subreddit=='Trump') 
+words.trump <- words.trump[,1] %>% unnest_tokens(word, body)
+
+#bing lexicon 
+bing_word_counts.trump <- words.trump %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+#plot Bing lexicon works 
+plot.bing.trump <- bing_word_counts.trump %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ggplot(aes(reorder(word, n), n, fill = sentiment)) +
+  geom_bar(alpha = 0.8, stat = "identity", show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(y = "Contribution to sentiment", x = NULL) +
+  coord_flip()
+
+#nrc lexicon 
+nrc_word_counts.trump <- words.trump %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(sentiment)) %>%
+  count(sentiment, sort = TRUE)
+plot.bing.trump
+nrc_word_counts.trump
+
+rm(words.trump)
+rm(bing_word_counts.trump)
+rm(plot.bing.trump)
+rm(nrc_word_counts.trump)
+rm(reg)
+```
+
+For Trump, the negative sentiment words include: fake, liar, expletive, racist, evil. It aslo includes many expletives, which we did not find in the Clinton sentiment analysis. The positive sentiment words include: Trump, love and right.  Far and away the leader for negative sentiment is the word liar, which Trump himself used many times to describe candidate Clinton on the election trail.  While there are no clear leaders in the positive Trump sentiment analyis either, the words appear to have stronger connoatitions (for positive and negative sentiments) than the words found in the Clinton sentiment analysis. 
+
+## Naive Bayesian Classifier
+
+The Naive Bayesian Classifier is a classification model that uses the Bayes theorem (with a strong independence assumption between variables) to classify observations.  The classifier may be applied to text data by counting the presence of words in a given feature.  Here we train a Naive Bayesian Classifier to the Trump/Clinton comments dataset, to form a model that can classfify comments as belonging in the Trump or Clinton subreddit.  We build a classification model so that we may be able to bring in a new data set of other comments from another subreddit and consider how many of those comments belong in the Trump or Clinton subreddit.  
+
+R/politics is the general subreddit for political discussion and posts on reddit, and it underwent a fair amount of turmoil surrounding the November 2016 election results.  The subredidt was counted as biased against Trump supporters happy with the election results, and driving them out by banning them and deleting their comments.  The Naive Bayesian Classifier is applied to a document matrix of all comments from r/politics in November 2016, showing the amount of comments which are likely to be alligned with either subreddit.  In doing so, we can see whether users and their comments who allign with Clinton vastly outnumber those who support Trump in r/politics subreddit following the election.
+
+
+```{r, echo=FALSE}
+set.seed(47)
+Trump_Clinton.comments$body <- Trump_Clinton.comments$body %>%
+  stri_trans_general('Latin-ASCII')
+
+Trump_Clinton.corpus <- Corpus(VectorSource(Trump_Clinton.comments$body))
+
+Trump_Clinton.corpus <- Trump_Clinton.corpus %>% 
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeWords, c("the", "and", stopwords("english"))) %>% 
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(tolower))
+
+# Create a document term matrix
+Trump_Clinton.dtm <- DocumentTermMatrix(Trump_Clinton.corpus)
+
+# Remove uncommon terms
+Trump_Clinton.dtm <- removeSparseTerms(Trump_Clinton.dtm, 0.99)
+
+#feature selection. Select only words that appear 5 or more times 
+fivefreq <- findFreqTerms(Trump_Clinton.dtm, lowfreq = 5)
+
+length(fivefreq) # Amount of terms appearing 5+ times
+
+Trump_Clinton.dtm <- DocumentTermMatrix(Trump_Clinton.corpus, control=list(dictionary = fivefreq)) #new dtm-include only words that appear 5 or more times 
+
+#Function to convert the word frequencies to yes (presence) and no (absence) labels
+convert_count <- function(x) {
+  y <- ifelse(x > 0, 1,0)
+  y <- factor(y, levels=c(0,1), labels=c("Absent", "Present"))
+  y
+}
+
+
+final.train <- apply(Trump_Clinton.dtm, 2, convert_count)  
+
+model <- train(as.data.frame(final.train), Trump_Clinton.comments$subreddit, 'nb',
+               trControl=trainControl(method='cv',number=10))
+
+model$results
+```
+
+The model has accuracy of around 86\%, according to error reported by cross validation.  The r/politics data set for November was obtained by the same methods as before, and as applied to the Bayes classifier below.  The output is the amount of comments predicted to be aligned with either the Trump or Clinton subreddit.
+
+```{r, echo=FALSE}
+politics.comments <- readr::read_csv(url('https://storage.googleapis.com/politics16/pol.csv')) 
+politics.comments <- sample_n(politics.comments, 10000)
+
+politics.comments <- readr::read_csv(url('https://storage.googleapis.com/politics16/polsample.csv'))
+
+politics.comments$body <- politics.comments$body %>%
+  stri_trans_general('Latin-ASCII')
+
+politics.corpus <- Corpus(VectorSource(politics.comments$body))
+rm(politics.comments)
+
+#add some more because spelled wrong, not fully clean? #convert to corpus
+#add in one to lower case
+politics.corpus <- politics.corpus %>% 
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeWords, c("the", "and", stopwords("english"))) %>% 
+  tm_map(stripWhitespace) %>% 
+  tm_map(content_transformer(tolower))
+
+politics.dtm <- DocumentTermMatrix(politics.corpus)
+politics.dtm <- removeSparseTerms(politics.dtm, 0.99)
+fivefreq <- findFreqTerms(politics.dtm, lowfreq = 5)
+politics.dtm <- DocumentTermMatrix(politics.corpus, control=list(dictionary = fivefreq))
+
+final.test <- apply(politics.dtm, 2, convert_count)  
+final.test <- as.data.frame(final.test)
+
+predictions <- predict( model , final.test)
+
+table(predictions)
+
+```
+
+The vast majority of comments made (and not deleted) in the r/politics subreddit in Novermber 2016 are predicted to be alligned with the Trump subreddit.  This is counter to the narrative that r/politics didn't allow Trump users in the subreddit following Trump's election, and instead it would imply that the majority of users in r/politics in November are aligned with Trump regardless. 
+
+## Conclusions
+
+The steps taken here have conducted statistical analysis to text data of all comments in 2016 in two datasets combined.  We've shown the most frequent words used in each respective, as well as the relatively more common words.  Lastly, we've trained a model for text data classification on the data set, before bringing in a supposedly neutral data set to apply the model to for a real application of teh statistical analysis.
+
+In the future, the analysis would be more complete if conducted on the entire dataset.  As of now, the analysis were conducted on very large subsets of the relevant datasets so that the computing power we have access to can work with the data.  By sheer sample size, the analysis will accurately predicta analysis for the entire dataset, yet would be more compelete if run with every observation.  The code included in this post may be edited only slightly, by removing the subsample commands, to be applied to the very very large .csv files for comments if the user has access to the computing power needed in R (RAM of abound 10GB to host the needed objects).
