@@ -8,7 +8,6 @@ output: pdf_document
 ---
 
 ```{r setup, echo=FALSE}
-rm(list=ls())
 knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, cache=TRUE, 
                       fig.align = "center")
 options(digits=4)
@@ -45,8 +44,8 @@ Note: the .csv files used are hosted at the Google cloud links used in the code,
 
 First load the dataset, and apply some routine cleaning steps.
 
-```{r, echo=FALSE}
-Trump_Clinton.comments <- readr::read_csv(url('https://storage.googleapis.com/trump_clinton_comments/trump_clinton_comments.csv'))
+```{r, echo=T}
+Trump_Clinton.comments <- readr::read_csv('Data/trump_clinton_comments.csv')
 Trump_Clinton.comments <- sample_n(Trump_Clinton.comments, 10000)
 
 Trump_Clinton.comments <- Trump_Clinton.comments %>%
@@ -54,7 +53,7 @@ Trump_Clinton.comments <- Trump_Clinton.comments %>%
   filter(body != '[deleted]') %>%
   filter(body != '[removed]') %>%
   filter(!is.na(body)) %>%
-  filter(!is.na(subreddit))  
+  filter(!is.na(subreddit))
 ```
 The dataset is extremely large, with around 9 million comments.  Since the data set is extremely large, we ran the analysis on a random subset of 1 million observations.  It should be noted that the Trump subreddit was around 5 times as large as the Clinton subreddit (by comment frequency).  We can see this in the following grap which shows the amount of comments per month. We see a sharp spike in comment frequency for Hillary and Trump starting in October, the month right before the November 2 election date. The Trumo comments increased by about 33% in October compared to the previous month and continued to stay at the same level for the next two months.  
 
@@ -72,9 +71,9 @@ Trump_Clinton.comments %>%
   scale_color_manual(values=c("blue", "red"))
 ```
 
-Below is one of the most 'upvoted' post on the Clinton campaign subreddit, to show an example of one of most the popular posts.
+Below is a 'upvoted' post on the Clinton campaign subreddit, to show an example of a standard post.
 
-![A top post on r/hillaryclinton, November 2016](Trump_election_post.png) 
+![A standard post on r/hillaryclinton, November 2016](Figures/Trump_election_post.png)
 
 Below is the most 'upvoted' post on the Trump campaign subreddit, where the man himself (or perhaps some of his campaign staff) answered some questions for interested parties.  There was some controversy surrounding this event on Reddit at the time, and as far as we are aware only posts pre-vetted by the site's moderators were answered by Trump (or his staff).
 
